@@ -2,11 +2,7 @@ from fastapi import FastAPI, Request
 import uvicorn
 import os
 from mcp.server.fastmcp import FastMCP
-from starlette.routing import Route
-from starlette.responses import StreamingResponse
-import json
 
-# 健康数据类型
 HEALTH_TYPES = [
     "heartRate", "restingHeartRate", "stepCount",
     "distanceWalkingRunning", "activeEnergyBurned",
@@ -16,7 +12,6 @@ HEALTH_TYPES = [
 
 latest_data = {t: {"value": None, "timestamp": None} for t in HEALTH_TYPES}
 
-# FastAPI HTTP 部分
 app = FastAPI()
 
 @app.get("/")
@@ -35,7 +30,7 @@ async def receive_health(request: Request):
             latest_data[tp] = {"value": val, "timestamp": ts}
     return {"status": "ok"}
 
-# MCP 服务
+# 创建 MCP 服务
 mcp = FastMCP("AppleHealth")
 
 @mcp.resource("health://{data_type}")
@@ -58,26 +53,15 @@ def get_summary() -> str:
         lines.append("暂无任何数据上传。")
     return "\n".join(lines)
 
-# ---- 显式创建 SSE 端点，直接让 Kelivo 连接 ----
-# 使用 mcp 内部的 SSE 传输工具
-from mcp.server.transport.sse import SseServerTransport
-from starlette.requests import Request as StarletteRequest
+# ---- 终极稳健挂载 ----
+# 优先尝试 streamable_http_app (新版)，失败则回退 http_app (旧版)
+try:
+    mcp_http = mcp.streamable_http_app()
+except AttributeError:
+    mcp_http = mcp.http_app()
 
-# 创建一个 SSE 传输实例，messages 路径设为 /mcp/messages
-sse = SseServerTransport("/mcp/messages")
-
-async def handle_sse(request: StarletteRequest):
-    return await sse.handle_sse(request)
-
-async def handle_messages(request: StarletteRequest):
-    return await sse.handle_messages(request)
-
-# 将两个路由直接注册到 FastAPI 应用上（绕过 http_app）
-app.add_route("/mcp/sse", handle_sse, methods=["GET", "POST"])
-app.add_route("/mcp/messages", handle_messages, methods=["POST"])
-
-# 可选保留原挂载（不影响）
-# app.mount("/mcp", mcp.http_app())
+# 挂载到 /mcp
+app.mount("/mcp", mcp_http)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
