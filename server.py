@@ -30,7 +30,6 @@ async def receive_health(request: Request):
             latest_data[tp] = {"value": val, "timestamp": ts}
     return {"status": "ok"}
 
-# 创建 MCP 服务
 mcp = FastMCP("AppleHealth")
 
 @mcp.resource("health://{data_type}")
@@ -53,15 +52,18 @@ def get_summary() -> str:
         lines.append("暂无任何数据上传。")
     return "\n".join(lines)
 
-# ---- 终极稳健挂载 ----
-# 优先尝试 streamable_http_app (新版)，失败则回退 http_app (旧版)
+# ---- 分别尝试挂载两种传输，互不影响 ----
+# 1. 尝试新版 Streamable HTTP（用于 Kelivo 的 Streamable HTTP）
 try:
-    mcp_http = mcp.streamable_http_app()
-except AttributeError:
-    mcp_http = mcp.http_app()
+    app.mount("/mcp/stream", mcp.streamable_http_app())
+except Exception:
+    pass
 
-# 挂载到 /mcp
-app.mount("/mcp", mcp_http)
+# 2. 尝试旧版 SSE（用于 Kelivo 的 SSE）
+try:
+    app.mount("/mcp/sse", mcp.http_app())
+except Exception:
+    pass
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
