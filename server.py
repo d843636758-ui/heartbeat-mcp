@@ -32,10 +32,17 @@ async def receive_health_data(request: Request):
 async def root():
     return {"status": "ok"}
 
-# ---------- 调试路由 ----------
+# ---------- 修复后的调试路由 ----------
 @app.get("/debug-routes")
 async def list_routes():
-    routes = [{"path": r.path, "methods": r.methods} for r in app.routes]
+    routes = []
+    for r in app.routes:
+        info = {"path": r.path}
+        if hasattr(r, "methods"):
+            info["methods"] = r.methods
+        else:
+            info["type"] = "mount"
+        routes.append(info)
     return {"routes": routes}
 
 # ---------- 挂载 MCP ----------
@@ -45,7 +52,7 @@ try:
     logging.info("✅ Streamable HTTP mounted at /mcp/stream/")
 except Exception as e:
     logging.error(f"❌ Failed to mount Streamable HTTP: {e}")
-    raise   # 直接抛出异常，让服务启动失败，方便在 Build/Runtime Logs 里看到
+    raise
 
 try:
     sse_app = mcp.sse_app()
