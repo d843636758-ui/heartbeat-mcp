@@ -1,70 +1,62 @@
-from fastapi import FastAPI, Request
-import uvicorn
 import os
+import logging
+from datetime import datetime
+from fastapi import FastAPI, Request
 from mcp.server.fastmcp import FastMCP
 
-HEALTH_TYPES = [
-    "heartRate", "restingHeartRate", "stepCount",
-    "distanceWalkingRunning", "activeEnergyBurned",
-    "oxygenSaturation", "bodyMass", "bodyFatPercentage",
-    "respiratoryRate", "bloodPressureSystolic", "bloodPressureDiastolic",
-]
+logging.basicConfig(level=logging.INFO)
 
-latest_data = {t: {"value": None, "timestamp": None} for t in HEALTH_TYPES}
+# 存储最新健康数据的容器
+latest_health_data = {
+    "timestamp": None,
+    "data": {}
+}
 
 app = FastAPI()
+mcp = FastMCP("heartbeat-mcp")
 
-@app.get("/")
-def health_check():
-    return {"status": "ok"}
+# ---------- 原有的心跳工具 ----------
+@mcp.tool()
+def heartbeat() -> str:
+    """返回心跳信号"""
+    return "alive"
 
-@app.post("/health")
-async def receive_health(request: Request):
-    global latest_data
-    data = await request.json()
-    for entry in data.get("samples", []):
-        tp = entry.get("type")
-        val = entry.get("value")
-        ts = entry.get("timestamp")
-        if tp in latest_data:
-            latest_data[tp] = {"value": val, "timestamp": ts}
-    return {"status": "ok"}
+# ---------- 健康数据工具（给 Kelivo 调用） ----------
+@mcp.tool()
+def get_latest_health_data() -> dict:
+    """获取最新上传的健康数据"""
+    if latest_health_data["timestamp"] is None:
+        return {"message": "暂无数据"}
+    return latest_health_data
 
-mcp = FastMCP("AppleHealth")
-
-@mcp.resource("health://{data_type}")
-def get_health_data(data_type: str) -> str:
-    if data_type not in latest_data:
-        return f"不支持的类型。支持：{', '.join(HEALTH_TYPES)}"
-    rec = latest_data[data_type]
-    if rec["value"] is None:
-        return f"{data_type} 暂无数据"
-    return f"{data_type}: {rec['value']}（时间 {rec['timestamp']}）"
-
-@mcp.resource("health://summary")
-def get_summary() -> str:
-    lines = ["📊 最新健康数据："]
-    for tp in HEALTH_TYPES:
-        rec = latest_data[tp]
-        if rec["value"] is not None:
-            lines.append(f"- {tp}: {rec['value']}（{rec['timestamp']}）")
-    if len(lines) == 1:
-        lines.append("暂无任何数据上传。")
-    return "\n".join(lines)
-
-# ---- 分别尝试挂载两种传输，互不影响 ----
-# 1. 尝试新版 Streamable HTTP（用于 Kelivo 的 Streamable HTTP）
+# ---------- MCP 传输挂载 ----------
 try:
     app.mount("/mcp/stream", mcp.streamable_http_app())
-except Exception:
-    pass
+    logging.info("Streamable HTTP transport mounted at /mcp/stream")
+except Exception as e:
+    logging.error(f"Failed to mount Streamable HTTP: {e}")
 
-# 2. 尝试旧版 SSE（用于 Kelivo 的 SSE）
 try:
-    app.mount("/mcp/sse", mcp.http_app())
-except Exception:
-    pass
+    app.mount("/mcp/sse", mcp.sse_app())
+    logging.info("SSE transport mounted at /mcp/sse")
+except Exception as e:
+    logging.error(f"Failed to mount SSE: {e}")
+
+# ---------- 健康数据接收接口（供快捷指令 POST） ----------
+@app.post("/health-data")
+async def receive_health_data(request: Request):
+    body = await request.json()
+    latest_health_data["timestamp"] = datetime.now().isoformat()
+    latest_health_data["data"] = body
+    logging.info(f"收到健康数据: {body}")
+    return {"status": "ok"}
+
+# 健康检查路由
+@app.get("/")
+async def root():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
