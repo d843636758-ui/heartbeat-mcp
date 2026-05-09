@@ -1,9 +1,13 @@
 from fastapi import FastAPI, Request
 import uvicorn
 import os
-from mcp.server.fastmcp import FastMCP
 
-# 支持的健康数据类型
+# 兼容不同版本的 mcp 导入方式
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    from mcp import FastMCP
+
 HEALTH_TYPES = [
     "heartRate", "restingHeartRate", "stepCount",
     "distanceWalkingRunning", "activeEnergyBurned",
@@ -13,8 +17,12 @@ HEALTH_TYPES = [
 
 latest_data = {t: {"value": None, "timestamp": None} for t in HEALTH_TYPES}
 
-# 创建 FastAPI 应用（负责接收手机上传的健康数据）
 app = FastAPI()
+
+# ✅ 关键：健康检查专用路径
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
 
 @app.post("/health")
 async def receive_health(request: Request):
@@ -28,7 +36,6 @@ async def receive_health(request: Request):
             latest_data[tp] = {"value": val, "timestamp": ts}
     return {"status": "ok"}
 
-# 创建 MCP 服务（负责把数据交给 kelivo）
 mcp = FastMCP("AppleHealth")
 
 @mcp.resource("health://{data_type}")
@@ -51,7 +58,6 @@ def get_summary() -> str:
         lines.append("暂无任何数据上传。")
     return "\n".join(lines)
 
-# 把 MCP 的 Streamable HTTP 应用挂载到 FastAPI 的 /mcp 路径
 app.mount("/mcp", mcp.http_app())
 
 if __name__ == "__main__":
