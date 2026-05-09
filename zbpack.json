@@ -1,5 +1,10 @@
 {
   "python": {
     "entry": "server.py"
+  },
+  "healthCheck": {
+    "http": {
+      "path": "/"
+    }
   }
 }
