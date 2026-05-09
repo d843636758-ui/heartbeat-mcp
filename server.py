@@ -89,8 +89,8 @@ except AttributeError:
         ])
 
 # 将 MCP 的 HTTP 服务挂载到 FastAPI 的 /mcp 路径
-app.mount("/mcp", mcp_http)
-
+app.mount("/mcp", 
+mcp.streamable_http_app())
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
